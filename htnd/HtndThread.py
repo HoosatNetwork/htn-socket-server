@@ -61,9 +61,11 @@ class HtndThread(object):
 
     async def request(self, command, params=None, wait_for_response=False, timeout=10):
         if wait_for_response:
+            # per-call queue: on a reused channel a stale "done" would end the next stream before its response
+            done = asyncio.queues.Queue()
             try:
-                async for resp in self.stub.MessageStream(self.yield_cmd(command, params, streaming=False), timeout=timeout):
-                    self.__queue.put_nowait("done")
+                async for resp in self.stub.MessageStream(self.yield_cmd(command, params, streaming=False, done=done), timeout=timeout):
+                    done.put_nowait("done")
                     return json_format.MessageToDict(resp)
             except grpc.aio._call.AioRpcError as e:
                 raise HtndCommunicationError(str(e))
@@ -83,7 +85,7 @@ class HtndThread(object):
         except (grpc.aio._call.AioRpcError, _MultiThreadedRendezvous) as e:
             raise HtndCommunicationError(str(e))
 
-    async def yield_cmd(self, cmd, params=None, streaming=False):
+    async def yield_cmd(self, cmd, params=None, streaming=False, done=None):
         msg = KaspadMessage()
         msg2 = getattr(msg, cmd)
         payload = params
@@ -97,7 +99,7 @@ class HtndThread(object):
         msg2.SetInParent()
         yield msg
         if not streaming:
-            await self.__queue.get()
+            await (done or self.__queue).get()
 
     def yield_cmd_sync(self, cmd, params=None):
         msg = KaspadMessage()

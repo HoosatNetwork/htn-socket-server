@@ -1,4 +1,5 @@
 # encoding: utf-8
+import atexit
 import logging
 import os
 
@@ -11,14 +12,16 @@ from pydantic import BaseModel
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+from helper.QueueLogging import start_queue_logging
 from htnd.HtndMultiClient import HtndMultiClient
 
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
-logging.basicConfig(
-    level=getattr(logging, LOG_LEVEL, logging.INFO),
-    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
-)
+# Records go through a bounded queue to a listener thread, so a stalled log sink cannot block the event loop.
+log_sink = logging.StreamHandler()
+log_sink.setFormatter(logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(message)s"))
+logging.getLogger().setLevel(getattr(logging, LOG_LEVEL, logging.INFO))
+atexit.register(start_queue_logging(logging.getLogger(), log_sink))
 logger = logging.getLogger(__name__)
 
 sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins=[])
